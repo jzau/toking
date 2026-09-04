@@ -347,3 +347,21 @@ export const auditEvents = pgTable(
   },
   (table) => [index("audit_events_target_idx").on(table.targetType, table.targetId)],
 );
+
+export const aiProviders = pgTable(
+  "ai_providers",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    adapter: text("adapter").notNull().default("openai-compatible"),
+    baseUrl: text("base_url").notNull(),
+    apiKeyCiphertext: text("api_key_ciphertext").notNull(),
+    apiKeyPrefix: text("api_key_prefix").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    ...timestamps,
+  },
+  (table) => [
+    index("ai_providers_enabled_idx").on(table.enabled),
+    check("ai_providers_adapter_check", sql`${table.adapter} = 'openai-compatible'`),
+  ],
+);

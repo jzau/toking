@@ -4,13 +4,13 @@ import { buildApp } from "../src/app.js";
 import { gatewayConfigSchema } from "../src/config.js";
 
 const gatewayKey = `tk_live_${"a".repeat(32)}`;
+const providers = [{ id: "gangram", name: "Gangram", baseUrl: "http://gangram.test/v1", apiKey: "gangram-test-key", adapter: "openai-compatible" as const, enabled: true }];
 
 function testConfig(overrides: Record<string, unknown> = {}) {
   return gatewayConfigSchema.parse({
     NODE_ENV: "test",
     CREDIT_SERVICE_BASE_URL: "http://credit.test",
     INTERNAL_SERVICE_SECRET: "test-internal-service-secret-that-is-long",
-    AI_PROVIDERS: [{ id: "gangram", name: "Gangram", baseUrl: "http://gangram.test/v1", apiKey: "gangram-test-key" }],
     CREDITS_PER_USD: 1_000_000,
     DEFAULT_RESERVATION_CREDITS: 1000,
     FALLBACK_CREDITS_PER_TOKEN: 1,
@@ -59,7 +59,7 @@ describe("Toking AI Gateway", () => {
       }
       throw new Error(`Unexpected URL: ${url}`);
     };
-    const app = await buildApp({ config: testConfig(), fetchImpl }); apps.push(app);
+    const app = await buildApp({ config: testConfig(), fetchImpl, providers }); apps.push(app);
     const response = await app.inject({
       method: "POST", url: "/v1/chat/completions",
       headers: { authorization: `Bearer ${gatewayKey}`, "x-request-id": "gateway-request-123" },
@@ -85,7 +85,7 @@ describe("Toking AI Gateway", () => {
       if (url.endsWith("/chat/completions")) return json({ error: { message: "Unknown model", type: "invalid_request_error", code: "model_not_found" } }, 400);
       throw new Error(`Unexpected URL: ${url}`);
     };
-    const app = await buildApp({ config: testConfig(), fetchImpl }); apps.push(app);
+    const app = await buildApp({ config: testConfig(), fetchImpl, providers }); apps.push(app);
     const response = await app.inject({ method: "POST", url: "/v1/chat/completions", headers: { authorization: `Bearer ${gatewayKey}` }, payload: { model: "gangram/missing/model", messages: [{ role: "user", content: "Hello" }] } });
 
     expect(response.statusCode).toBe(400);
@@ -113,7 +113,7 @@ describe("Toking AI Gateway", () => {
       }
       throw new Error(`Unexpected URL: ${url}`);
     };
-    const app = await buildApp({ config: testConfig(), fetchImpl }); apps.push(app);
+    const app = await buildApp({ config: testConfig(), fetchImpl, providers }); apps.push(app);
     const response = await app.inject({ method: "POST", url: "/v1/chat/completions", headers: { authorization: `Bearer ${gatewayKey}` }, payload: { model: "gangram/openai/gpt-4o-mini", stream: true, messages: [{ role: "user", content: "Hello" }] } });
 
     expect(response.statusCode).toBe(200);
@@ -138,7 +138,7 @@ describe("Toking AI Gateway", () => {
       }
       throw new Error(`Unexpected URL: ${url}`);
     };
-    const app = await buildApp({ config: testConfig({ DEFAULT_RESERVATION_CREDITS: 5 }), fetchImpl }); apps.push(app);
+    const app = await buildApp({ config: testConfig({ DEFAULT_RESERVATION_CREDITS: 5 }), fetchImpl, providers }); apps.push(app);
     const response = await app.inject({ method: "POST", url: "/v1/chat/completions", headers: { authorization: `Bearer ${gatewayKey}` }, payload: { model: "gangram/test/model", stream: true, messages: [{ role: "user", content: "Hi" }] } });
 
     expect(response.statusCode).toBe(200);
@@ -149,7 +149,7 @@ describe("Toking AI Gateway", () => {
   it("rejects malformed Toking API keys before reserving credit", async () => {
     let called = false;
     const fetchImpl: typeof fetch = async () => { called = true; return json({}); };
-    const app = await buildApp({ config: testConfig(), fetchImpl }); apps.push(app);
+    const app = await buildApp({ config: testConfig(), fetchImpl, providers }); apps.push(app);
     const response = await app.inject({ method: "POST", url: "/v1/chat/completions", headers: { authorization: "Bearer invalid" }, payload: { model: "gangram/test/model", messages: [{ role: "user", content: "Hi" }] } });
     expect(response.statusCode).toBe(401);
     expect(response.json().error.code).toBe("invalid_api_key");

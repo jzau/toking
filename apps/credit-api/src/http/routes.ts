@@ -37,6 +37,15 @@ import {
 } from "../services/reservations.js";
 import { recordAudit } from "../services/audit.js";
 import { resolveGatewayApiKey } from "../services/credit-accounts.js";
+import {
+  createAiProvider,
+  internalAiProviders,
+  listAiProviders,
+  providerBaseUrlSchema,
+  providerIdSchema,
+  testAiProvider,
+  updateAiProvider,
+} from "../services/ai-providers.js";
 
 const idempotencyHeader = z.string().min(8).max(200);
 const positiveCredits = z.coerce.bigint().positive();
@@ -357,6 +366,79 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   app.get("/v1/admin/audit-events", async (request) => {
     requireAdmin(request);
     return db.select().from(auditEvents).orderBy(desc(auditEvents.createdAt)).limit(100);
+  });
+
+  app.get("/v1/admin/ai-providers", async (request) => {
+    requireAdmin(request);
+    return listAiProviders(db);
+  });
+
+  app.post("/v1/admin/ai-providers", async (request, reply) => {
+    requireAdmin(request);
+    const body = z.object({
+      id: providerIdSchema,
+      name: z.string().min(1).max(120),
+      baseUrl: providerBaseUrlSchema,
+      apiKey: z.string().min(1).max(1000),
+      enabled: z.boolean().default(true),
+    }).parse(request.body);
+    const provider = await createAiProvider(db, body);
+    await recordAudit(db, {
+      actorType: "admin",
+      actorId: "v1-admin",
+      action: "ai_provider.created",
+      targetType: "ai_provider",
+      targetId: provider.id,
+      metadata: { name: provider.name, baseUrl: provider.baseUrl, enabled: provider.enabled },
+    });
+    return reply.code(201).send(provider);
+  });
+
+  app.patch("/v1/admin/ai-providers/:id", async (request) => {
+    requireAdmin(request);
+    const params = z.object({ id: providerIdSchema }).parse(request.params);
+    const body = z.object({
+      name: z.string().min(1).max(120).optional(),
+      baseUrl: providerBaseUrlSchema.optional(),
+      apiKey: z.string().min(1).max(1000).optional(),
+      enabled: z.boolean().optional(),
+    }).refine((value) => Object.keys(value).length > 0, "At least one change is required")
+      .parse(request.body);
+    const provider = await updateAiProvider(db, params.id, body);
+    await recordAudit(db, {
+      actorType: "admin",
+      actorId: "v1-admin",
+      action: "ai_provider.updated",
+      targetType: "ai_provider",
+      targetId: provider.id,
+      metadata: {
+        ...(body.name !== undefined ? { name: body.name } : {}),
+        ...(body.baseUrl !== undefined ? { baseUrl: body.baseUrl } : {}),
+        ...(body.apiKey !== undefined ? { credentialRotated: true } : {}),
+        ...(body.enabled !== undefined ? { enabled: body.enabled } : {}),
+      },
+    });
+    return provider;
+  });
+
+  app.post("/v1/admin/ai-providers/:id/test", async (request) => {
+    requireAdmin(request);
+    const params = z.object({ id: providerIdSchema }).parse(request.params);
+    const result = await testAiProvider(db, params.id);
+    await recordAudit(db, {
+      actorType: "admin",
+      actorId: "v1-admin",
+      action: "ai_provider.tested",
+      targetType: "ai_provider",
+      targetId: params.id,
+      metadata: { modelCount: result.modelCount },
+    });
+    return result;
+  });
+
+  app.get("/internal/v1/ai-providers", async (request) => {
+    requireInternalService(request);
+    return internalAiProviders(db);
   });
 
   app.post("/internal/v1/gateway-api-keys/resolve", async (request) => {

@@ -16,10 +16,10 @@ existing API. Gangram's live API has not yet been connected or verified.
 
 ## Registering providers in Toking
 
-Set `AI_PROVIDERS` to a JSON array in the gateway environment. Each entry has a
-unique, stable `id`, a display `name`, an `adapter`, a versioned `baseUrl`, a
-provider-issued `apiKey`, and an `enabled` flag. The currently supported adapter
-is `openai-compatible`.
+Create providers in the Toking admin dashboard. Each entry has a unique, stable
+`id`, a display `name`, an `adapter`, a versioned `baseUrl`, a provider-issued
+`apiKey`, and an `enabled` flag. The currently supported adapter is
+`openai-compatible`.
 
 ```json
 [
@@ -42,11 +42,11 @@ is `openai-compatible`.
 ]
 ```
 
-The addresses above are placeholders. Store the JSON on one line when using a
-`.env` file. Production configuration must use real HTTPS endpoints and secret
-credentials. Restart the gateway after changing the registry. Disabled entries
-are excluded from discovery and routing. The registry is deployment
-configuration; there is no provider self-registration API in V1.
+The addresses above are placeholders. Production configuration must use real
+HTTPS endpoints and secret credentials. API keys are encrypted in PostgreSQL,
+are write-only in the admin API, and are sent only to the gateway over its
+authenticated internal connection. Disabled entries are excluded from discovery
+and routing. The gateway refreshes registry changes without a restart.
 
 Providers own their catalogs; Toking does not maintain a second hardcoded model
 list. Adding a provider that implements this contract needs configuration only.
@@ -212,7 +212,7 @@ implemented in V1.
 Before enabling Gangram in production:
 
 1. Gangram supplies its versioned HTTPS base URL and a Toking-specific bearer
-   credential through the deployment secret store.
+   credential to a Toking administrator through an approved secret-sharing channel.
 2. Gangram's `/models` response passes the catalog contract and contains only
    routable chat models.
 3. Non-streaming and streaming calls pass model routing, cancellation, final
@@ -220,5 +220,5 @@ Before enabling Gangram in production:
 4. Both teams reconcile sampled generation IDs, token counts, and USD cost.
 5. Operations verify credential rotation, catalog outage behavior, request-ID
    correlation, rate limits, content retention, and incident contacts.
-6. Toking enables Gangram in `AI_PROVIDERS` and verifies the public catalog
+6. Toking enables Gangram in the admin dashboard and verifies the public catalog
    before sending production traffic.

@@ -88,8 +88,11 @@ npm run dev:admin
 ```
 
 Open `http://localhost:3000` and sign in with the development admin password.
+Use the **AI providers** section to add Gangram's OpenAI-compatible base URL and
+API key. Provider credentials are encrypted in PostgreSQL and are never returned
+by the admin API after they are saved.
 
-Copy the gateway environment template and configure the Gangram provider URL and API key:
+Copy the gateway environment template:
 
 ```sh
 cp apps/ai-gateway/.env.example apps/ai-gateway/.env
@@ -112,11 +115,10 @@ Third-party gift-card storefronts should follow
 [`docs/THIRD_PARTY_GIFT_CARD_INTEGRATION.md`](docs/THIRD_PARTY_GIFT_CARD_INTEGRATION.md)
 for scoped catalog access, anonymous redemption, and customer credential delivery.
 
-The gateway example configuration uses a placeholder local Gangram endpoint.
 Gangram must supply its real base URL and credential before live inference can
 run. Clients discover models with `GET /v1/models` and use returned IDs such as
-`gangram/vendor/model-name` in chat requests. The old single-provider environment
-settings are replaced by the `AI_PROVIDERS` registry.
+`gangram/vendor/model-name` in chat requests. The gateway refreshes enabled
+providers from the Credit Service without requiring a restart.
 
 Run one reservation-expiry worker pass:
 

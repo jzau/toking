@@ -5,7 +5,7 @@ import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { randomUUID } from "node:crypto";
 import { z, ZodError } from "zod";
 
-import { config as defaultConfig, type GatewayConfig } from "./config.js";
+import { config as defaultConfig, type GatewayConfig, type ProviderConfig } from "./config.js";
 import { CreditClient, type Reservation } from "./credit-client.js";
 import { GatewayError, openAiError } from "./errors.js";
 import { estimateCredits, estimatePromptTokens, type Usage, usageCredits } from "./pricing.js";
@@ -200,11 +200,15 @@ async function streamCompletion(input: {
   }
 }
 
-export async function buildApp(options: { config?: GatewayConfig; fetchImpl?: typeof fetch } = {}) {
+export async function buildApp(options: { config?: GatewayConfig; fetchImpl?: typeof fetch; providers?: ProviderConfig[] } = {}) {
   const config = options.config ?? defaultConfig;
   const fetchImpl = options.fetchImpl ?? fetch;
   const creditClient = new CreditClient(config, fetchImpl);
-  const providers = new ProviderRegistry(config, fetchImpl);
+  const providers = new ProviderRegistry(
+    config,
+    fetchImpl,
+    options.providers ? async () => options.providers! : () => creditClient.providers(),
+  );
   const app = Fastify({ logger: config.NODE_ENV !== "test", trustProxy: true, requestIdHeader: "x-request-id" });
 
   await app.register(helmet, { contentSecurityPolicy: false });
@@ -222,7 +226,7 @@ export async function buildApp(options: { config?: GatewayConfig; fetchImpl?: ty
 
   app.get("/health", async () => ({
     status: "ok", service: "toking-ai-gateway",
-    providers: providers.providers.map((provider) => ({ id: provider.id, name: provider.name })),
+    providers: await providers.configured(),
   }));
 
   app.get("/v1/models", async (request, reply) => {

@@ -114,6 +114,10 @@ input:focus,select:focus { border-color:var(--accent); box-shadow:0 0 0 4px rgba
 .credential-fields code { overflow:hidden; text-overflow:ellipsis; font-size:11px; }
 .credential-fields button span { color:var(--accent-dark); font-size:10px; }
 .inline-form { margin-top:40px; display:grid; grid-template-columns:minmax(240px,1.2fr) minmax(220px,1fr) auto; align-items:end; }
+.provider-form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; }
+.checkbox-field { display:flex; align-items:center; gap:10px; }
+.checkbox-field input { width:18px; height:18px; margin:0; }
+.provider-actions { display:flex; justify-content:flex-end; gap:6px; }
 .table-card { margin-top:18px; padding:0; overflow:hidden; }
 .table-card>.section-heading { padding:26px 28px 4px; }
 .table-wrap { overflow-x:auto; }
@@ -136,5 +140,5 @@ tbody tr:hover,.selected-row { background:#faf5eb; }
 .toast span { color:#83d4aa; }
 
 @media (max-width:1050px) { .metric-grid { grid-template-columns:repeat(2,1fr); } .metric-card:nth-child(3) { border-left:0; border-top:1px solid var(--line); } .metric-card:nth-child(4) { border-top:1px solid var(--line); } .inline-form { grid-template-columns:1fr 1fr; } .inline-form>div { grid-column:1/-1; } }
-@media (max-width:800px) { .login-shell { grid-template-columns:1fr; } .login-story { display:none; } .login-panel { min-height:100vh; padding:28px; } .mobile-brand { margin-bottom:70px; display:flex; align-items:center; gap:10px; font-weight:700; } .dashboard-shell { grid-template-columns:1fr; } .sidebar { position:static; height:auto; padding:16px; flex-direction:row; align-items:center; overflow-x:auto; } .brand-lockup.compact { margin:0 18px 0 0; } .sidebar-label,.sidebar-footer { display:none; } .sidebar nav { display:flex; } .nav-button { width:auto; white-space:nowrap; } .workspace { padding:28px 18px 52px; } .two-column { grid-template-columns:1fr; } .redeem-form,.credential-result,.inline-form { grid-template-columns:1fr; } .inline-form>div { grid-column:auto; } .secret-list { grid-template-columns:1fr; } }
+@media (max-width:800px) { .login-shell { grid-template-columns:1fr; } .login-story { display:none; } .login-panel { min-height:100vh; padding:28px; } .mobile-brand { margin-bottom:70px; display:flex; align-items:center; gap:10px; font-weight:700; } .dashboard-shell { grid-template-columns:1fr; } .sidebar { position:static; height:auto; padding:16px; flex-direction:row; align-items:center; overflow-x:auto; } .brand-lockup.compact { margin:0 18px 0 0; } .sidebar-label,.sidebar-footer { display:none; } .sidebar nav { display:flex; } .nav-button { width:auto; white-space:nowrap; } .workspace { padding:28px 18px 52px; } .two-column { grid-template-columns:1fr; } .redeem-form,.credential-result,.inline-form,.provider-form-grid { grid-template-columns:1fr; } .inline-form>div { grid-column:auto; } .secret-list { grid-template-columns:1fr; } }
 @media (max-width:560px) { .topbar { align-items:flex-start; } .topbar-actions { flex-direction:column; } .metric-grid { grid-template-columns:1fr; } .metric-card,.metric-card:nth-child(3),.metric-card:nth-child(4) { border-left:0; border-top:1px solid var(--line); } .metric-card:first-child { border-top:0; } .field-pair { grid-template-columns:1fr; } .secret-card { grid-template-columns:1fr; } .secret-list { grid-column:auto; } }

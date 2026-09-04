@@ -23,6 +23,10 @@ const environmentSchema = z.object({
     .string()
     .min(32)
     .default("development-internal-secret-change-me-now"),
+  PROVIDER_CREDENTIAL_SECRET: z
+    .string()
+    .min(32)
+    .default("development-provider-credential-secret"),
   DEV_OTP_CODE: z.string().regex(/^\d{6}$/).default("123456"),
   TOKING_GATEWAY_BASE_URL: z
     .string()
@@ -39,6 +43,7 @@ if (config.NODE_ENV === "production") {
     config.ADMIN_PASSWORD === "development-admin",
     config.ADMIN_SESSION_SECRET.startsWith("development-"),
     config.INTERNAL_SERVICE_SECRET.startsWith("development-"),
+    config.PROVIDER_CREDENTIAL_SECRET.startsWith("development-"),
   ];
 
   if (unsafeDefaults.some(Boolean)) {

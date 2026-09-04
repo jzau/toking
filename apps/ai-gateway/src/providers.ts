@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { GatewayConfig, ProviderConfig } from "./config.js";
+import { providerConfigSchema, type GatewayConfig, type ProviderConfig } from "./config.js";
 import { GatewayError } from "./errors.js";
 
 // Only explicitly supported catalog fields cross the public gateway boundary.
@@ -84,22 +84,57 @@ export class OpenAiCompatibleProvider implements AiProvider {
 }
 
 export class ProviderRegistry {
-  readonly providers: AiProvider[];
+  private cache?: { expiresAt: number; signature: string; providers: AiProvider[] };
+  private pending?: Promise<AiProvider[]>;
 
-  constructor(config: GatewayConfig, fetchImpl: typeof fetch) {
-    this.providers = config.AI_PROVIDERS.filter((provider) => provider.enabled)
-      .map((provider) => new OpenAiCompatibleProvider(provider, config, fetchImpl));
+  constructor(
+    private readonly config: GatewayConfig,
+    private readonly fetchImpl: typeof fetch,
+    private readonly loadProviderConfigs: () => Promise<ProviderConfig[]>,
+  ) {}
+
+  private async activeProviders(): Promise<AiProvider[]> {
+    if (this.cache && this.cache.expiresAt > Date.now()) return this.cache.providers;
+    if (this.pending) return this.pending;
+    this.pending = this.refreshProviders();
+    try { return await this.pending; } finally { this.pending = undefined; }
+  }
+
+  private async refreshProviders(): Promise<AiProvider[]> {
+    let configs: ProviderConfig[];
+    try {
+      configs = z.array(providerConfigSchema).parse(await this.loadProviderConfigs())
+        .filter((provider) => provider.enabled);
+    } catch {
+      if (this.cache) return this.cache.providers;
+      throw new GatewayError(503, "provider_config_unavailable", "AI provider configuration is unavailable");
+    }
+    const signature = JSON.stringify(configs);
+    const providers = this.cache?.signature === signature
+      ? this.cache.providers
+      : configs.map((provider) => new OpenAiCompatibleProvider(provider, this.config, this.fetchImpl));
+    this.cache = {
+      signature,
+      providers,
+      expiresAt: Date.now() + this.config.PROVIDER_CONFIG_TTL_MS,
+    };
+    return providers;
+  }
+
+  async configured() {
+    return (await this.activeProviders()).map((provider) => ({ id: provider.id, name: provider.name }));
   }
 
   async catalog() {
-    if (!this.providers.length) throw new GatewayError(503, "provider_not_configured", "No AI providers are configured");
-    const results = await Promise.allSettled(this.providers.map(async (provider) =>
+    const providers = await this.activeProviders();
+    if (!providers.length) throw new GatewayError(503, "provider_not_configured", "No AI providers are configured");
+    const results = await Promise.allSettled(providers.map(async (provider) =>
       (await provider.models()).map((model) => ({ ...model, id: `${provider.id}/${model.id}`, provider: provider.id })),
     ));
     if (results.every((result) => result.status === "rejected")) {
       throw new GatewayError(503, "provider_catalog_unavailable", "All AI provider catalogs are unavailable");
     }
-    const unavailable = results.flatMap((result, index) => result.status === "rejected" ? [this.providers[index]!.id] : []);
+    const unavailable = results.flatMap((result, index) => result.status === "rejected" ? [providers[index]!.id] : []);
     return {
       object: "list" as const,
       data: results.flatMap((result) => result.status === "fulfilled" ? result.value : []),
@@ -108,9 +143,10 @@ export class ProviderRegistry {
   }
 
   async resolve(model: string) {
-    if (!this.providers.length) throw new GatewayError(503, "provider_not_configured", "No AI providers are configured");
+    const providers = await this.activeProviders();
+    if (!providers.length) throw new GatewayError(503, "provider_not_configured", "No AI providers are configured");
     const separator = model.indexOf("/");
-    const provider = this.providers.find((candidate) => candidate.id === model.slice(0, separator));
+    const provider = providers.find((candidate) => candidate.id === model.slice(0, separator));
     const upstreamModel = model.slice(separator + 1);
     if (separator < 1 || !provider || !upstreamModel) {
       throw new GatewayError(404, "model_not_found", "Use a model ID returned by GET /v1/models", "invalid_request_error");

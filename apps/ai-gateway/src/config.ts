@@ -12,14 +12,6 @@ export const providerConfigSchema = z.object({
   enabled: z.boolean().default(true),
 }).refine((provider) => !provider.enabled || provider.apiKey.trim().length > 0, "Enabled providers require an API key");
 
-const providersSchema = z.preprocess((value) => {
-  if (typeof value !== "string") return value;
-  try { return JSON.parse(value); } catch { return null; }
-}, z.array(providerConfigSchema).refine(
-  (providers) => new Set(providers.map((provider) => provider.id)).size === providers.length,
-  "Provider IDs must be unique",
-));
-
 export type ProviderConfig = z.infer<typeof providerConfigSchema>;
 
 export const gatewayConfigSchema = z.object({
@@ -28,7 +20,7 @@ export const gatewayConfigSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3200),
   CREDIT_SERVICE_BASE_URL: z.string().url().default("http://127.0.0.1:3100"),
   INTERNAL_SERVICE_SECRET: z.string().min(32).default("development-internal-secret-change-me-now"),
-  AI_PROVIDERS: providersSchema.default([]),
+  PROVIDER_CONFIG_TTL_MS: z.coerce.number().int().nonnegative().default(30_000),
   MODEL_CATALOG_TTL_MS: z.coerce.number().int().nonnegative().default(60_000),
   MODEL_CATALOG_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
   CREDITS_PER_USD: z.coerce.number().positive().default(1_000_000),
@@ -41,10 +33,6 @@ export type GatewayConfig = z.infer<typeof gatewayConfigSchema>;
 export const config = gatewayConfigSchema.parse(process.env);
 
 if (config.NODE_ENV === "production") {
-  if (!config.AI_PROVIDERS.some((provider) => provider.enabled)) throw new Error("At least one enabled AI provider is required in production");
-  if (config.AI_PROVIDERS.some((provider) => provider.enabled && !provider.baseUrl.startsWith("https://"))) {
-    throw new Error("Enabled AI providers must use HTTPS in production");
-  }
   if (config.INTERNAL_SERVICE_SECRET.startsWith("development-")) {
     throw new Error("INTERNAL_SERVICE_SECRET must be explicitly configured in production");
   }

@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { buildApp } from "../src/app.js";
 import { db, sql } from "../src/db/client.js";
-import { ledgerAccounts, ledgerEntries, ledgerJournals } from "../src/db/schema.js";
+import { aiProviders, ledgerAccounts, ledgerEntries, ledgerJournals } from "../src/db/schema.js";
 import { newId } from "../src/lib/ids.js";
 
 const unique = Date.now().toString();
@@ -225,6 +225,51 @@ describe("Credit Service V1 flow", () => {
     expect(clients.json().some((client: { name: string }) => client.name === `Gift website ${unique}`)).toBe(true);
     expect(accounts.json().length).toBeGreaterThanOrEqual(2);
     expect(audit.json().some((event: { action: string }) => event.action === "gift_cards.generated")).toBe(true);
+  });
+
+  it("manages encrypted AI provider credentials through the admin plane", async () => {
+    const headers = { authorization: `Bearer ${adminToken}` };
+    const id = `test-${unique}`;
+    const rawKey = `provider-secret-${unique}`;
+    const created = await app.inject({
+      method: "POST",
+      url: "/v1/admin/ai-providers",
+      headers,
+      payload: { id, name: "Test provider", baseUrl: "http://provider.test/v1/", apiKey: rawKey, enabled: true },
+    });
+    expect(created.statusCode).toBe(201);
+    expect(created.json()).toMatchObject({ id, baseUrl: "http://provider.test/v1", enabled: true });
+    expect(created.body).not.toContain(rawKey);
+
+    const [stored] = await db.select().from(aiProviders).where(eq(aiProviders.id, id)).limit(1);
+    expect(stored?.apiKeyCiphertext).not.toContain(rawKey);
+
+    const listed = await app.inject({ method: "GET", url: "/v1/admin/ai-providers", headers });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.body).not.toContain(rawKey);
+    expect(listed.json().some((provider: { id: string }) => provider.id === id)).toBe(true);
+
+    const internal = await app.inject({
+      method: "GET",
+      url: "/internal/v1/ai-providers",
+      headers: { "x-toking-internal-secret": "development-internal-secret-change-me-now" },
+    });
+    expect(internal.statusCode).toBe(200);
+    expect(internal.json().find((provider: { id: string }) => provider.id === id).apiKey).toBe(rawKey);
+
+    const disabled = await app.inject({
+      method: "PATCH",
+      url: `/v1/admin/ai-providers/${id}`,
+      headers,
+      payload: { enabled: false },
+    });
+    expect(disabled.statusCode).toBe(200);
+    const active = await app.inject({
+      method: "GET",
+      url: "/internal/v1/ai-providers",
+      headers: { "x-toking-internal-secret": "development-internal-secret-change-me-now" },
+    });
+    expect(active.json().some((provider: { id: string }) => provider.id === id)).toBe(false);
   });
 
   it("rejects an unbalanced journal at the database boundary", async () => {

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buildApp } from "../src/app.js";
-import { gatewayConfigSchema } from "../src/config.js";
+import { gatewayConfigSchema, providerConfigSchema, type ProviderConfig } from "../src/config.js";
 import { usageCredits } from "../src/pricing.js";
 import { ProviderRegistry } from "../src/providers.js";
 
@@ -12,13 +12,13 @@ const second = { id: "second", name: "Second", baseUrl: "http://second.test/v1",
 const model = { id: "lab/chat", object: "model", created: 123, owned_by: "lab", context_length: 8192 };
 const catalog = { object: "list", data: [model] };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
-const config = (overrides: Record<string, unknown> = {}) => gatewayConfigSchema.parse({ NODE_ENV: "test", AI_PROVIDERS: [gangram, second], ...overrides });
+const config = (overrides: Record<string, unknown> = {}) => gatewayConfigSchema.parse({ NODE_ENV: "test", ...overrides });
 const resolved = () => json({ creditAccountId: "account", defaultProviderId: null });
 
 const apps: Array<Awaited<ReturnType<typeof buildApp>>> = [];
 afterEach(async () => { vi.useRealTimers(); await Promise.all(apps.splice(0).map((app) => app.close())); });
-async function appWith(fetchImpl: typeof fetch, overrides: Record<string, unknown> = {}) {
-  const app = await buildApp({ config: config(overrides), fetchImpl });
+async function appWith(fetchImpl: typeof fetch, overrides: Record<string, unknown> = {}, providerConfigs: ProviderConfig[] = [gangram, second]) {
+  const app = await buildApp({ config: config(overrides), fetchImpl, providers: providerConfigs });
   apps.push(app);
   return app;
 }
@@ -34,6 +34,24 @@ describe("provider discovery and routing", () => {
     expect(response.statusCode).toBe(401);
     expect(response.json().error.code).toBe("invalid_api_key");
     expect(called).toBe(false);
+  });
+
+  it("loads provider credentials from the authenticated Credit Service endpoint", async () => {
+    const calls: Array<{ url: string; headers: Headers }> = [];
+    const app = await buildApp({ config: config(), fetchImpl: async (input, init) => {
+      const url = String(input);
+      calls.push({ url, headers: new Headers(init?.headers) });
+      if (url.endsWith("/gateway-api-keys/resolve")) return resolved();
+      if (url.endsWith("/internal/v1/ai-providers")) return json([gangram]);
+      if (url.endsWith("/models")) return json(catalog);
+      throw new Error(`Unexpected call: ${url}`);
+    }});
+    apps.push(app);
+    const response = await app.inject({ url: "/v1/models", headers: authorization });
+    expect(response.statusCode).toBe(200);
+    const registryCall = calls.find((call) => call.url.endsWith("/internal/v1/ai-providers"));
+    expect(registryCall?.headers.get("x-toking-internal-secret")).toBe("development-internal-secret-change-me-now");
+    expect(response.body).not.toContain("gangram-secret");
   });
 
   it("authenticates every catalog read, caches providers, namespaces duplicate models, and never reserves credits", async () => {
@@ -79,7 +97,7 @@ describe("provider discovery and routing", () => {
       if (url.startsWith(gangram.baseUrl)) return json(catalog);
       if (url.startsWith(second.baseUrl)) return json({ error: "private failure" }, 500);
       throw new Error(`Unexpected call: ${url}`);
-    }, { AI_PROVIDERS: [gangram, second, { ...gangram, id: "disabled", enabled: false, apiKey: "" }] });
+    }, {}, [gangram, second, { ...gangram, id: "disabled", enabled: false, apiKey: "" }]);
     const response = await app.inject({ url: "/v1/models", headers: authorization });
     expect(response.statusCode).toBe(200);
     expect(response.json().data).toHaveLength(1);
@@ -138,10 +156,10 @@ describe("provider discovery and routing", () => {
   it("refreshes expired catalogs, coalesces concurrent reads, and rejects removed models", async () => {
     vi.useFakeTimers();
     let count = 0;
-    const registry = new ProviderRegistry(config({ AI_PROVIDERS: [gangram], MODEL_CATALOG_TTL_MS: 100 }), async () => {
+    const registry = new ProviderRegistry(config({ MODEL_CATALOG_TTL_MS: 100 }), async () => {
       count++;
       return json(count === 1 ? catalog : { object: "list", data: [] });
-    });
+    }, async () => [gangram]);
     await Promise.all([registry.catalog(), registry.catalog()]);
     expect(count).toBe(1);
     await vi.advanceTimersByTimeAsync(101);
@@ -150,17 +168,16 @@ describe("provider discovery and routing", () => {
   });
 
   it("times out provider discovery", async () => {
-    const registry = new ProviderRegistry(config({ AI_PROVIDERS: [gangram], MODEL_CATALOG_TIMEOUT_MS: 10 }), async (_input, init) => new Promise((_resolve, reject) => {
+    const registry = new ProviderRegistry(config({ MODEL_CATALOG_TIMEOUT_MS: 10 }), async (_input, init) => new Promise((_resolve, reject) => {
       init?.signal?.addEventListener("abort", () => reject(new Error("Aborted")), { once: true });
-    }));
+    }), async () => [gangram]);
     await expect(registry.catalog()).rejects.toMatchObject({ statusCode: 503 });
   });
 
-  it("rejects duplicate provider IDs, missing keys, malformed JSON, and unsafe URL schemes", () => {
-    for (const providers of [[gangram, gangram], [{ ...gangram, apiKey: "" }], "not-json", [{ ...gangram, baseUrl: "file:///tmp/models" }]]) {
-      expect(() => config({ AI_PROVIDERS: providers })).toThrow();
+  it("rejects missing keys and unsafe provider URL schemes", () => {
+    for (const provider of [{ ...gangram, apiKey: "" }, { ...gangram, baseUrl: "file:///tmp/models" }]) {
+      expect(() => providerConfigSchema.parse(provider)).toThrow();
     }
-    expect(config({ AI_PROVIDERS: JSON.stringify([gangram]) }).AI_PROVIDERS).toHaveLength(1);
   });
 
   it("does not confuse absent or malformed cost with explicit zero-cost usage", () => {

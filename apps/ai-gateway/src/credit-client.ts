@@ -1,4 +1,4 @@
-import type { GatewayConfig } from "./config.js";
+import type { GatewayConfig, ProviderConfig } from "./config.js";
 import { GatewayError } from "./errors.js";
 
 export type Reservation = {
@@ -45,6 +45,10 @@ export class CreditClient {
       method: "POST",
       body: JSON.stringify({ gatewayApiKey }),
     });
+  }
+
+  providers() {
+    return this.request<ProviderConfig[]>("/internal/v1/ai-providers", { method: "GET" });
   }
 
   reserve(gatewayApiKey: string, gatewayRequestId: string, estimatedCredits: bigint) {
