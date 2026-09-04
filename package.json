@@ -1,0 +1,24 @@
+{
+  "name": "toking",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:credit": "npm run dev --workspace @toking/credit-api",
+    "dev:admin": "npm run dev --workspace @toking/admin-web",
+    "dev:gateway": "npm run dev --workspace @toking/ai-gateway",
+    "worker:credit": "npm run worker:reservations --workspace @toking/credit-api",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "db:generate": "npm run db:generate --workspace @toking/credit-api",
+    "db:migrate": "npm run db:migrate --workspace @toking/credit-api"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

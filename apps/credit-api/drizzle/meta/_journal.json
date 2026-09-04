@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1787724539131,
+      "tag": "0000_cute_exodus",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1787724584846,
+      "tag": "0001_perfect_living_tribunal",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787724585846,
+      "tag": "0002_ledger_guards",
+      "breakpoints": true
+    }
+  ]
+}

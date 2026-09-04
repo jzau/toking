@@ -1,0 +1,7 @@
+ALTER TABLE "credit_accounts" ADD CONSTRAINT "credit_accounts_owner_check" CHECK (("credit_accounts"."owner_type" = 'user' AND "credit_accounts"."user_id" IS NOT NULL) OR ("credit_accounts"."owner_type" = 'anonymous' AND "credit_accounts"."user_id" IS NULL));--> statement-breakpoint
+ALTER TABLE "credit_accounts" ADD CONSTRAINT "credit_accounts_reserved_nonnegative" CHECK ("credit_accounts"."reserved_balance" >= 0);--> statement-breakpoint
+ALTER TABLE "gift_cards" ADD CONSTRAINT "gift_cards_credit_amount_positive" CHECK ("gift_cards"."credit_amount" > 0);--> statement-breakpoint
+ALTER TABLE "ledger_entries" ADD CONSTRAINT "ledger_entries_amount_nonzero" CHECK ("ledger_entries"."amount" <> 0);--> statement-breakpoint
+ALTER TABLE "otp_challenges" ADD CONSTRAINT "otp_challenges_attempts_range" CHECK ("otp_challenges"."attempts" >= 0 AND "otp_challenges"."attempts" <= 5);--> statement-breakpoint
+ALTER TABLE "reservations" ADD CONSTRAINT "reservations_estimated_positive" CHECK ("reservations"."estimated_credits" > 0);--> statement-breakpoint
+ALTER TABLE "reservations" ADD CONSTRAINT "reservations_captured_positive" CHECK ("reservations"."captured_credits" IS NULL OR "reservations"."captured_credits" > 0);
