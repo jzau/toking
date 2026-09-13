@@ -142,6 +142,23 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     });
   });
 
+  app.post("/v1/client/gift-cards/redeem", async (request) => {
+    const client = await authenticateClient(db, bearerToken(request), "gift-cards:redeem");
+    const body = z
+      .object({
+        code: z.string().min(10).max(100),
+        externalUserId: z.string().trim().min(1).max(200),
+      })
+      .parse(request.body);
+    return redeemGiftCard({
+      code: body.code,
+      idempotencyKey: idempotencyKey(request.headers),
+      clientId: client.clientId,
+      externalUserId: body.externalUserId,
+      anonymous: false,
+    });
+  });
+
   app.post("/v1/admin/login", async (request) => {
     const body = z.object({ password: z.string() }).parse(request.body);
     if (!safeEqual(body.password, config.ADMIN_PASSWORD)) {

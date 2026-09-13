@@ -19,7 +19,8 @@ decisions and invariants.
 - Single-password admin sessions
 - Integration clients and scoped client API keys
 - Gift-card batches and secure one-time code generation
-- Anonymous redemption into an anonymous Credit Account
+- Anonymous redemption into a new anonymous Credit Account
+- Partner-user redemption into one persistent Toking wallet per external user
 - Authenticated redemption into a user's wallet
 - Toking Gateway API-key issuance
 - Encrypted idempotent replay of redemption responses
@@ -159,7 +160,7 @@ replayed so a network failure does not lose the newly issued API key.
 - `/v1/auth/*`: user OTP and sessions
 - `/v1/wallet*`: authenticated user wallet queries
 - `/v1/gift-cards/*`: authenticated user redemption
-- `/v1/client/*`: scoped third-party redemption
+- `/v1/client/*`: scoped anonymous or persistent-wallet third-party redemption
 - `/v1/admin/*`: V1 administration
 - `/internal/v1/*`: future AI Gateway charging contract
 

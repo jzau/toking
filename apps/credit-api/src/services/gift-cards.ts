@@ -9,6 +9,7 @@ import {
   giftCardRedemptions,
   giftCards,
   idempotencyRecords,
+  integrationCustomerAccounts,
 } from "../db/schema.js";
 import {
   decryptJson,
@@ -83,6 +84,7 @@ export async function generateGiftCards(
 interface RedeemResult {
   transactionId: string;
   creditAccountId: string;
+  walletCreated: boolean;
   credited: bigint;
   balanceAfter: bigint;
   baseUrl: string;
@@ -97,15 +99,23 @@ export async function redeemGiftCard(input: {
   idempotencyKey: string;
   creditAccountId?: string;
   clientId?: string;
+  externalUserId?: string;
   anonymous: boolean;
 }): Promise<RedeemResult> {
   const normalizedCode = input.code.trim().toUpperCase();
   const codeHash = sha256(normalizedCode);
-  const idempotencyScope = input.anonymous
-    ? `gift-redemption:client:${input.clientId ?? "unknown"}`
+  const externalUserId = input.externalUserId?.trim();
+  const idempotencyScope = input.clientId
+    ? `gift-redemption:client:${input.clientId}`
     : `gift-redemption:account:${input.creditAccountId ?? "unknown"}`;
   const requestHash = sha256(
-    [codeHash, input.creditAccountId ?? "", input.clientId ?? "", String(input.anonymous)].join(":"),
+    [
+      codeHash,
+      input.creditAccountId ?? "",
+      input.clientId ?? "",
+      externalUserId ?? "",
+      String(input.anonymous),
+    ].join(":"),
   );
 
   return db.transaction(async (tx) => {
@@ -159,9 +169,38 @@ export async function redeemGiftCard(input: {
       throw new AppError(409, "gift_card_expired", "Gift card has expired");
     }
 
-    const creditAccountId = input.anonymous
-      ? await createCreditAccount(tx, { ownerType: "anonymous" })
-      : input.creditAccountId;
+    let createdCustomerAccount = false;
+    let creditAccountId = input.creditAccountId;
+    if (input.anonymous) {
+      creditAccountId = await createCreditAccount(tx, { ownerType: "anonymous" });
+      createdCustomerAccount = true;
+    } else if (input.clientId && externalUserId) {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`integration-customer:${input.clientId}:${externalUserId}`}, 0))`,
+      );
+      const mapped = await tx
+        .select({ creditAccountId: integrationCustomerAccounts.creditAccountId })
+        .from(integrationCustomerAccounts)
+        .where(
+          and(
+            eq(integrationCustomerAccounts.clientId, input.clientId),
+            eq(integrationCustomerAccounts.externalUserId, externalUserId),
+          ),
+        )
+        .limit(1);
+      if (mapped[0]) {
+        creditAccountId = mapped[0].creditAccountId;
+      } else {
+        creditAccountId = await createCreditAccount(tx, { ownerType: "anonymous" });
+        await tx.insert(integrationCustomerAccounts).values({
+          id: newId(),
+          clientId: input.clientId,
+          externalUserId,
+          creditAccountId,
+        });
+        createdCustomerAccount = true;
+      }
+    }
     if (!creditAccountId) {
       throw new AppError(401, "user_account_required", "A user Credit Account is required");
     }
@@ -187,7 +226,10 @@ export async function redeemGiftCard(input: {
       type: "gift_card_redemption",
       sourceReference: card.id,
       idempotencyKey: `gift-card:${card.id}`,
-      metadata: { clientId: input.clientId ?? null },
+      metadata: {
+        clientId: input.clientId ?? null,
+        externalUserId: externalUserId ?? null,
+      },
       entries: [
         { ledgerAccountId: walletLedgerId, amount: card.creditAmount },
         { ledgerAccountId: clearingLedgerId, amount: -card.creditAmount },
@@ -216,7 +258,7 @@ export async function redeemGiftCard(input: {
     });
 
     let key: Awaited<ReturnType<typeof createGatewayApiKey>> | undefined;
-    if (input.anonymous) {
+    if (input.anonymous || createdCustomerAccount) {
       key = await createGatewayApiKey(tx, creditAccountId);
     } else {
       const existingKey = await tx
@@ -236,6 +278,7 @@ export async function redeemGiftCard(input: {
     const result: RedeemResult = {
       transactionId: journalId,
       creditAccountId,
+      walletCreated: createdCustomerAccount,
       credited: card.creditAmount,
       balanceAfter,
       baseUrl: gatewayBaseUrl,

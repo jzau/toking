@@ -40,7 +40,7 @@ describe("Credit Service V1 flow", () => {
       headers: { authorization: `Bearer ${adminToken}` },
       payload: {
         name: "Test redemption key",
-        scopes: ["gift-cards:redeem-anonymously"],
+        scopes: ["gift-cards:redeem-anonymously", "gift-cards:redeem"],
       },
     });
     expect(credential.statusCode).toBe(201);
@@ -58,7 +58,7 @@ describe("Credit Service V1 flow", () => {
       method: "POST",
       url: `/v1/admin/gift-card-batches/${batch.json().id}/cards`,
       headers: { authorization: `Bearer ${adminToken}` },
-      payload: { quantity: 2, creditAmount: "1000" },
+      payload: { quantity: 5, creditAmount: "1000" },
     });
     expect(cards.statusCode).toBe(201);
     giftCodes = cards.json().map((card: { code: string }) => card.code);
@@ -197,6 +197,54 @@ describe("Credit Service V1 flow", () => {
       availableBalance: "1000",
       canReserve: true,
     });
+  });
+
+  it("resolves one wallet per third-party user and credits later cards to it", async () => {
+    const redeemFor = (code: string, externalUserId: string, key: string) =>
+      app.inject({
+        method: "POST",
+        url: "/v1/client/gift-cards/redeem",
+        headers: {
+          authorization: `Bearer ${clientApiKey}`,
+          "idempotency-key": key,
+        },
+        payload: { code, externalUserId },
+      });
+
+    const first = await redeemFor(giftCodes[2], "gangram-user-42", `linked-first-${unique}`);
+    expect(first.statusCode).toBe(200);
+    expect(first.json()).toMatchObject({
+      walletCreated: true,
+      credited: "1000",
+      balanceAfter: "1000",
+    });
+    expect(first.json().apiKey).toMatch(/^tk_live_/);
+
+    const topUp = await redeemFor(giftCodes[3], "gangram-user-42", `linked-topup-${unique}`);
+    expect(topUp.statusCode).toBe(200);
+    expect(topUp.json()).toMatchObject({
+      creditAccountId: first.json().creditAccountId,
+      walletCreated: false,
+      credited: "1000",
+      balanceAfter: "2000",
+    });
+    expect(topUp.json()).not.toHaveProperty("apiKey");
+
+    const otherUser = await redeemFor(giftCodes[4], "gangram-user-99", `linked-other-${unique}`);
+    expect(otherUser.statusCode).toBe(200);
+    expect(otherUser.json().walletCreated).toBe(true);
+    expect(otherUser.json().creditAccountId).not.toBe(first.json().creditAccountId);
+
+    const mappings = await sql`
+      select external_user_id
+      from integration_customer_accounts
+      where credit_account_id in (${first.json().creditAccountId}, ${otherUser.json().creditAccountId})
+    `;
+    expect(mappings).toHaveLength(2);
+    expect(mappings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ external_user_id: "gangram-user-42" }),
+      expect.objectContaining({ external_user_id: "gangram-user-99" }),
+    ]));
   });
 
   it("keeps every posted journal balanced", async () => {

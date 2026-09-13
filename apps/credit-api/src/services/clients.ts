@@ -8,6 +8,7 @@ import { newId } from "../lib/ids.js";
 
 export const CLIENT_API_SCOPES = [
   "gift-cards:redeem-anonymously",
+  "gift-cards:redeem",
 ] as const;
 export type ClientApiScope = typeof CLIENT_API_SCOPES[number];
 

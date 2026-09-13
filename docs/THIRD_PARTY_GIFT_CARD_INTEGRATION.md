@@ -6,7 +6,10 @@ then displays the AI models available to the purchaser.
 ## Credentials and service addresses
 
 Toking creates an integration client for the seller and issues a `tci_live_...`
-client API key with the `gift-cards:redeem-anonymously` scope. Keep this key on
+client API key. Use the `gift-cards:redeem` scope when the seller has signed-in
+users who should keep one Toking wallet across top-ups. Use
+`gift-cards:redeem-anonymously` only for one-off purchases with no stable user
+identity. Keep this key on
 the seller's server. Do not put it in browser JavaScript, a mobile app,
 analytics, URLs, or logs. Toking displays it only when it is created.
 
@@ -52,6 +55,10 @@ Credit API with the server's reverse proxy.
 
 ### Using the admin dashboard
 
+The dashboard currently issues keys for one-off anonymous redemption. For a
+signed-in customer integration that reuses wallets, use the admin API in the
+next section so the key receives the `gift-cards:redeem` scope.
+
 1. Open `https://admin.tokim.ai` and sign in with the configured admin password.
 2. Open **Integrations**.
 3. Create an integration using the seller's business or platform name.
@@ -60,9 +67,9 @@ Credit API with the server's reverse proxy.
    seller through an approved secret-sharing channel. The raw key is shown only
    once.
 
-The dashboard creates the key with the
-`gift-cards:redeem-anonymously` scope. Each seller should receive a separate
-integration and key so it can be audited or revoked independently.
+The dashboard creates the key with the `gift-cards:redeem-anonymously` scope.
+Each seller should receive a separate integration and key so it can be audited
+or revoked independently.
 
 ### Using the admin API
 
@@ -97,7 +104,7 @@ Content-Type: application/json
 
 {
   "name":"Production redemption key",
-  "scopes":["gift-cards:redeem-anonymously"]
+  "scopes":["gift-cards:redeem"]
 }
 ```
 
@@ -116,20 +123,25 @@ hash and cannot display the raw key later. Create a replacement key when one is
 lost or rotated, and deactivate the previous credential before using its
 replacement.
 
-## Step 1: redeem a purchased gift card
+## Step 1: redeem into a persistent customer wallet
+
+For an authenticated customer, send a stable, opaque user ID from the seller's
+own system. Toking stores this opaque identifier and uses the combination of
+seller and user ID to resolve the same wallet on every redemption. Do not send
+an email address, phone number, username, or other personal identifier.
 
 The seller's backend sends the gift-card code to the Credit API. Generate a
 unique idempotency key for the redemption attempt and retain it until the request
 has a definite response.
 
 ```http
-POST /v1/client/gift-cards/redeem-anonymously HTTP/1.1
+POST /v1/client/gift-cards/redeem HTTP/1.1
 Host: credit.tokim.ai
 Authorization: Bearer tci_live_REPLACE_WITH_SELLER_KEY
 Content-Type: application/json
 Idempotency-Key: 8f40d778-25c4-4603-a444-a31b215812ed
 
-{"code":"TK7M9X2P4R8W6Y3N5"}
+{"code":"TK7M9X2P4R8W6Y3N5","externalUserId":"seller-user-42"}
 ```
 
 A successful response creates an anonymous Credit Account and returns its Toking
@@ -139,6 +151,7 @@ AI credential:
 {
   "transactionId": "019c0000-0000-7000-8000-000000000001",
   "creditAccountId": "019c0000-0000-7000-8000-000000000002",
+  "walletCreated": true,
   "credited": "10000",
   "balanceAfter": "10000",
   "baseUrl": "https://api.tokim.ai/v1",
@@ -150,7 +163,11 @@ AI credential:
 ```
 
 Credit values are decimal strings. The gift card is consumed atomically with
-the credit ledger entry and account creation.
+the credit ledger entry and wallet lookup or creation. A later redemption for
+the same `externalUserId` returns the same `creditAccountId`, sets
+`walletCreated` to `false`, and adds to its existing balance. The customer API
+key is returned only when a wallet or replacement key is created, so the seller
+must retain the first successful response securely.
 
 The `tk_live_...` key belongs to the purchaser's new Credit Account. Deliver it
 to the purchaser over the authenticated purchase session and show it as a
@@ -162,6 +179,14 @@ If the seller loses the HTTP response, retry the same code with the same
 issued customer API key. Reusing that idempotency key with another code returns
 409. Retrying with a new key after a successful redemption returns a
 card-unavailable error.
+
+### One-off anonymous redemption
+
+For purchases that have no stable customer identity, use
+`POST /v1/client/gift-cards/redeem-anonymously` with the
+`gift-cards:redeem-anonymously` scope and a body containing only `code`. This
+always creates a new wallet and must not be used for signed-in users who expect
+later cards to top up the same balance.
 
 ## Step 2: fetch and display the models
 
@@ -237,8 +262,8 @@ idempotency key to obtain the original result.
 ## Toking onboarding checklist
 
 1. Toking creates and approves the seller integration client.
-2. Toking issues a production client key with
-   `gift-cards:redeem-anonymously`.
+2. Toking issues a production client key with `gift-cards:redeem` (and the
+   anonymous scope only when the seller also supports one-off purchases).
 3. The seller stores the integration key in its server-side secret store.
 4. Both parties confirm production Credit API and AI Gateway addresses.
 5. The seller tests one successful redemption, an idempotent retry, model

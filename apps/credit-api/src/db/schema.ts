@@ -175,6 +175,30 @@ export const clientApiKeys = pgTable(
   ],
 );
 
+export const integrationCustomerAccounts = pgTable(
+  "integration_customer_accounts",
+  {
+    id: uuid("id").primaryKey(),
+    clientId: uuid("client_id")
+      .notNull()
+      .references(() => integrationClients.id),
+    externalUserId: text("external_user_id").notNull(),
+    creditAccountId: uuid("credit_account_id")
+      .notNull()
+      .references(() => creditAccounts.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("integration_customer_accounts_client_user_unique").on(
+      table.clientId,
+      table.externalUserId,
+    ),
+    uniqueIndex("integration_customer_accounts_credit_account_unique").on(
+      table.creditAccountId,
+    ),
+  ],
+);
+
 export const gatewayApiKeys = pgTable(
   "gateway_api_keys",
   {
