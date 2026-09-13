@@ -46,6 +46,17 @@ export async function buildApp() {
       });
     }
 
+    if (error instanceof Error && "code" in error
+      && (error.code === "FST_ERR_CTP_EMPTY_JSON_BODY" || error.code === "FST_ERR_CTP_INVALID_JSON_BODY")) {
+      return reply.code(400).send({
+        error: {
+          code: "invalid_request",
+          message: "Request body must contain valid JSON when Content-Type is application/json",
+          requestId: request.id,
+        },
+      });
+    }
+
     request.log.error(error);
     return reply.code(500).send({
       error: {

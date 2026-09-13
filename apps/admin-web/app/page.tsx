@@ -64,7 +64,10 @@ export default function Home() {
   useEffect(() => { setToken(sessionStorage.getItem('toking_admin_token') ?? ''); setRedeemClientKey(sessionStorage.getItem('toking_client_api_key') ?? ''); },[]);
 
   const adminRequest = useCallback(async <T,>(path:string,options?:RequestInit):Promise<T> => {
-    const response = await fetch(`${API_URL}${path}`,{ ...options,headers:{ authorization:`Bearer ${token}`,'content-type':'application/json',...options?.headers } });
+    const headers = new Headers(options?.headers);
+    headers.set('authorization',`Bearer ${token}`);
+    if (options?.body != null && !headers.has('content-type')) headers.set('content-type','application/json');
+    const response = await fetch(`${API_URL}${path}`,{ ...options,headers });
     const body = await response.json().catch(() => ({})) as { error?: { message?: string } };
     if (!response.ok) {
       if (response.status === 401) { sessionStorage.removeItem('toking_admin_token'); setToken(''); }
