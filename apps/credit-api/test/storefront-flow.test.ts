@@ -46,7 +46,7 @@ beforeAll(async () => {
     expect(JSON.parse(String(init?.body)).model).toBe("test/model");
     return failProvider ? json({error: {message: "Temporary provider failure"}}, 503) : json({id: "test-completion", object: "chat.completion", model: "test/model", choices: [{index: 0, message: {role: "assistant", content: "Hello"}, finish_reason: "stop"}], usage: {prompt_tokens: 5, completion_tokens: 2, total_tokens: 7, cost: 0.000007}});
   };
-  gateway = await buildGateway({config: gatewayConfigSchema.parse({NODE_ENV: "test", CREDIT_SERVICE_BASE_URL: "http://credit.test", MODEL_CATALOG_TTL_MS: 0}), fetchImpl, providers: [{id: "test", name: "Test", baseUrl: "http://provider.test/v1", apiKey: "test-provider-key", enabled: true, adapter: "openai-compatible"}]});
+  gateway = await buildGateway({config: gatewayConfigSchema.parse({NODE_ENV: "test", CREDIT_SERVICE_BASE_URL: "http://credit.test", MODEL_CATALOG_TTL_MS: 0, CREDITS_PER_USD: 100}), fetchImpl, providers: [{id: "test", name: "Test", baseUrl: "http://provider.test/v1", apiKey: "test-provider-key", enabled: true, adapter: "openai-compatible"}]});
 });
 afterAll(async () => { await gateway?.close(); await credit?.close(); await sql.end(); });
 const redeem = (code: string, key = attempt, token = client) => credit.inject({method: "POST", url: "/v1/client/gift-cards/redeem-anonymously", headers: {authorization: `Bearer ${token}`, "idempotency-key": key}, payload: {code}});
