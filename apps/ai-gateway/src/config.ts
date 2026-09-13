@@ -23,9 +23,9 @@ export const gatewayConfigSchema = z.object({
   PROVIDER_CONFIG_TTL_MS: z.coerce.number().int().nonnegative().default(30_000),
   MODEL_CATALOG_TTL_MS: z.coerce.number().int().nonnegative().default(60_000),
   MODEL_CATALOG_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
-  CREDITS_PER_USD: z.coerce.number().positive().default(1_000_000),
-  DEFAULT_RESERVATION_CREDITS: z.coerce.bigint().positive().default(1000n),
-  FALLBACK_CREDITS_PER_TOKEN: z.coerce.number().positive().default(1),
+  CREDITS_PER_USD: z.coerce.number().positive().default(100),
+  DEFAULT_RESERVATION_CREDITS: z.coerce.bigint().positive().default(1n),
+  FALLBACK_CREDITS_PER_TOKEN: z.coerce.number().positive().default(0.0001),
   UPSTREAM_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
 });
 

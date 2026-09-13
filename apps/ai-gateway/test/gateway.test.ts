@@ -114,7 +114,7 @@ describe("Toking AI Gateway", () => {
       throw new Error(`Unexpected URL: ${url}`);
     };
     const app = await buildApp({ config: testConfig(), fetchImpl, providers }); apps.push(app);
-    const response = await app.inject({ method: "POST", url: "/v1/chat/completions", headers: { authorization: `Bearer ${gatewayKey}` }, payload: { model: "gangram/openai/gpt-4o-mini", stream: true, messages: [{ role: "user", content: "Hello" }] } });
+    const response = await app.inject({ method: "POST", url: "/v1/chat/completions", headers: { authorization: `Bearer ${gatewayKey}` }, payload: { model: "gangram/openai/gpt-4o-mini", stream: true, messages: [{ role: "user", content: "Hello".repeat(12000) }] } });
 
     expect(response.statusCode).toBe(200);
     expect(response.headers["content-type"]).toContain("text/event-stream");
@@ -124,7 +124,7 @@ describe("Toking AI Gateway", () => {
     expect(captured[0]).toMatchObject({ capturedCredits: "2000" });
   });
 
-  it("cuts off a stream when estimated usage exceeds the spendable balance", async () => {
+  it("caps unpriced incomplete stream charges at the reservation", async () => {
     const captured: Array<Record<string, unknown>> = [];
     const fetchImpl: typeof fetch = async (input, init) => {
       const url = String(input);
@@ -142,8 +142,9 @@ describe("Toking AI Gateway", () => {
     const response = await app.inject({ method: "POST", url: "/v1/chat/completions", headers: { authorization: `Bearer ${gatewayKey}` }, payload: { model: "gangram/test/model", stream: true, messages: [{ role: "user", content: "Hi" }] } });
 
     expect(response.statusCode).toBe(200);
-    expect(response.body).toContain("insufficient_credits");
-    expect(BigInt(String(captured[0]?.capturedCredits))).toBeGreaterThan(5n);
+    expect(response.body).toContain("provider_stream_incomplete");
+    expect(response.body).not.toContain("insufficient_credits");
+    expect(captured[0]).toMatchObject({ capturedCredits: "5", metadata: { billingBasis: "capped_estimate" } });
   });
 
   it("rejects malformed Toking API keys before reserving credit", async () => {

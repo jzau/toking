@@ -29,7 +29,6 @@ function gatewayBearerToken(request: FastifyRequest): string {
     throw new GatewayError(401, "invalid_api_key", "Invalid Toking API key", "invalid_request_error");
   }
   return token;
-  return token;
 }
 
 function outputCharacters(payload: unknown): number {
@@ -66,7 +65,13 @@ async function settle(
   fallbackCredits: bigint,
   upstreamId?: string,
 ) {
-  const credits = usageCredits(config, usage) ?? fallbackCredits;
+  const cost = usage?.cost;
+  const hasReportedCost = (typeof cost === "number" || (typeof cost === "string" && cost.trim() !== ""))
+    && Number.isFinite(Number(cost)) && Number(cost) >= 0;
+  const calculatedCredits = usageCredits(config, usage) ?? fallbackCredits;
+  // Unpriced token estimates must never overdraw the amount reserved for this request.
+  const reservedCredits = BigInt(reservation.reservedCredits);
+  const credits = hasReportedCost || calculatedCredits <= reservedCredits ? calculatedCredits : reservedCredits;
   if (credits <= 0n) {
     await client.release(reservation.reservationId, "provider_reported_zero_cost");
     return { credits: 0n, captured: false };
@@ -77,6 +82,7 @@ async function settle(
     model,
     upstreamId: upstreamId ?? null,
     usage: usage ?? null,
+    billingBasis: hasReportedCost ? "reported_cost" : "capped_estimate",
   });
   return { credits, captured: true };
 }
@@ -157,8 +163,11 @@ async function streamCompletion(input: {
       for (const event of events) {
         if (!event) continue;
         sawDone = handleEvent(event);
-        const estimated = estimateCredits(config, promptTokens, characters);
-        if (!usage && estimated > spendableCredits) {
+        // Prompt size is not a monetary price. Wait for a provider-reported cost.
+        const cost = usage?.cost;
+        const reportedCredits = (typeof cost === "number" || (typeof cost === "string" && cost.trim() !== ""))
+          && Number.isFinite(Number(cost)) && Number(cost) >= 0 ? usageCredits(config, usage) : null;
+        if (reportedCredits !== null && reportedCredits > spendableCredits) {
           stoppedForBalance = true;
           sawDone = true;
           controller.abort();

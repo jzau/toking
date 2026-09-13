@@ -12,7 +12,7 @@ const second = { id: "second", name: "Second", baseUrl: "http://second.test/v1",
 const model = { id: "lab/chat", object: "model", created: 123, owned_by: "lab", context_length: 8192 };
 const catalog = { object: "list", data: [model] };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
-const config = (overrides: Record<string, unknown> = {}) => gatewayConfigSchema.parse({ NODE_ENV: "test", ...overrides });
+const config = (overrides: Record<string, unknown> = {}) => gatewayConfigSchema.parse({ NODE_ENV: "test", CREDITS_PER_USD: 1000000, FALLBACK_CREDITS_PER_TOKEN: 1, ...overrides });
 const resolved = () => json({ creditAccountId: "account", defaultProviderId: null });
 
 const apps: Array<Awaited<ReturnType<typeof buildApp>>> = [];
@@ -132,7 +132,7 @@ describe("provider discovery and routing", () => {
       const url = String(input);
       if (url.endsWith("/resolve")) return resolved();
       if (url.endsWith("/models")) return json(catalog);
-      if (url.endsWith("/reservations")) return json({ reservationId: "reservation-id", postedBalance: "10000" });
+      if (url.endsWith("/reservations")) return json({ reservationId: "reservation-id", postedBalance: "10000", reservedCredits: "1000", availableBalance: "9000" });
       if (url.endsWith("/capture")) { capture = JSON.parse(String(init?.body)); return json({}); }
       if (url.endsWith("/chat/completions")) {
         completion = { url, init };
@@ -196,7 +196,7 @@ describe("provider response conformance", () => {
       const url = String(input);
       if (url.endsWith("/resolve")) return resolved();
       if (url.endsWith("/models")) return json(catalog);
-      if (url.endsWith("/reservations")) return json({ reservationId: "reservation-id", postedBalance: "10000" });
+      if (url.endsWith("/reservations")) return json({ reservationId: "reservation-id", postedBalance: "10000", reservedCredits: "1000", availableBalance: "9000" });
       if (url.endsWith("/capture") || url.endsWith("/release")) {
         settlements.push({ kind: url.split("/").pop()!, body: JSON.parse(String(init?.body)) });
         return json({});
@@ -250,4 +250,11 @@ describe("provider response conformance", () => {
     expect(response.body).toContain("provider_stream_incomplete");
     expect(settlements.map((entry) => entry.kind)).toEqual(["capture"]);
   });
+});
+
+ it("prices $100 at 10,000 Credits with the new default denomination", () => {
+  const rates = gatewayConfigSchema.parse({ NODE_ENV: "test" });
+  expect(usageCredits(rates, { cost: 100 })).toBe(10000n);
+  expect(usageCredits(rates, { cost: 0.026624735 })).toBe(3n);
+  expect(rates.DEFAULT_RESERVATION_CREDITS).toBe(1n);
 });

@@ -19,7 +19,9 @@ Service database.
 5. Toking captures reported USD cost, reported tokens, or an estimated fallback.
 6. The reservation is released when the provider fails before producing output.
 
-`CREDITS_PER_USD` converts provider-reported USD cost to integer Toking Credits.
+`CREDITS_PER_USD=100` converts provider-reported USD cost to integer Toking Credits: 10,000 Credits = $100. Set it in the gateway environment and restart the gateway to apply changes. Each request rounds its charge up to a whole Credit ($0.01).
+
+`DEFAULT_RESERVATION_CREDITS=1` holds one Credit per request; `FALLBACK_CREDITS_PER_TOKEN=0.0001` scales unpriced token estimates to this denomination. Unverified charges are capped at the reserved amount. Rate changes apply to new requests; existing balances and ledger entries are not converted.
 `DEFAULT_RESERVATION_CREDITS` controls the initial hold and does not cap the final
 charge.
 Capture uses a stable idempotency key and is retried up to three times. Captures
