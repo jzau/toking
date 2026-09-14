@@ -18,6 +18,18 @@ const chatCompletionSchema = z.object({
 }).loose();
 
 type ChatCompletionBody = z.infer<typeof chatCompletionSchema>;
+type TaskContext = { id?: string; name?: string };
+
+function taskContext(request: FastifyRequest): TaskContext | undefined {
+  const context = z.object({
+    id: z.string().trim().min(1).max(200).optional(),
+    name: z.string().trim().min(1).max(200).optional(),
+  }).parse({
+    id: request.headers["x-toking-task-id"],
+    name: request.headers["x-toking-task-name"],
+  });
+  return context.id || context.name ? context : undefined;
+}
 
 function gatewayBearerToken(request: FastifyRequest): string {
   const authorization = request.headers.authorization;
@@ -64,6 +76,7 @@ async function settle(
   usage: Usage | undefined,
   fallbackCredits: bigint,
   upstreamId?: string,
+  task?: TaskContext,
 ) {
   const cost = usage?.cost;
   const hasReportedCost = (typeof cost === "number" || (typeof cost === "string" && cost.trim() !== ""))
@@ -81,6 +94,7 @@ async function settle(
     upstreamModel,
     model,
     upstreamId: upstreamId ?? null,
+    ...(task ? { task } : {}),
     usage: usage ?? null,
     billingBasis: hasReportedCost ? "reported_cost" : "capped_estimate",
   });
@@ -98,8 +112,9 @@ async function streamCompletion(input: {
   upstreamModel: string;
   body: ChatCompletionBody;
   promptTokens: number;
+  task?: TaskContext;
 }) {
-  const { reply, upstream, controller, creditClient, config, reservation, providerId, upstreamModel, body, promptTokens } = input;
+  const { reply, upstream, controller, creditClient, config, reservation, providerId, upstreamModel, body, promptTokens, task } = input;
   if (!upstream.body) {
     await safelyRelease(creditClient, reservation.reservationId, "empty_provider_stream");
     throw new GatewayError(502, "empty_provider_response", "AI provider returned an empty stream");
@@ -183,7 +198,7 @@ async function streamCompletion(input: {
     if (providerFailed && characters === 0 && !usage) {
       await safelyRelease(creditClient, reservation.reservationId, "provider_stream_failed_before_output");
     } else {
-      await settle(creditClient, config, reservation, providerId, upstreamModel, body.model, usage, fallbackCredits, upstreamId);
+      await settle(creditClient, config, reservation, providerId, upstreamModel, body.model, usage, fallbackCredits, upstreamId, task);
     }
     settled = true;
 
@@ -195,7 +210,7 @@ async function streamCompletion(input: {
     if (!settled) {
       const fallbackCredits = estimateCredits(config, promptTokens, characters);
       try {
-        if (characters > 0) await settle(creditClient, config, reservation, providerId, upstreamModel, body.model, usage, fallbackCredits, upstreamId);
+        if (characters > 0) await settle(creditClient, config, reservation, providerId, upstreamModel, body.model, usage, fallbackCredits, upstreamId, task);
         else await safelyRelease(creditClient, reservation.reservationId, "stream_failed_before_output");
       } catch { /* the reservation expiry worker remains the final fallback */ }
     }
@@ -244,10 +259,32 @@ export async function buildApp(options: { config?: GatewayConfig; fetchImpl?: ty
     return providers.catalog();
   });
 
+  app.get("/v1/wallet", async (request, reply) => {
+    const wallet = await creditClient.wallet(gatewayBearerToken(request));
+    reply.header("cache-control", "no-store");
+    return wallet;
+  });
+
+  app.get("/v1/wallet/transactions", async (request, reply) => {
+    const gatewayApiKey = gatewayBearerToken(request);
+    const query = z.object({
+      limit: z.coerce.number().int().min(1).max(100).default(20),
+      cursor: z.string().min(1).max(1000).optional(),
+    }).parse(request.query);
+    const transactions = await creditClient.walletTransactions(
+      gatewayApiKey,
+      query.limit,
+      query.cursor,
+    );
+    reply.header("cache-control", "no-store");
+    return transactions;
+  });
+
   app.post("/v1/chat/completions", async (request, reply) => {
     const gatewayApiKey = gatewayBearerToken(request);
     const body = chatCompletionSchema.parse(request.body);
     await creditClient.authenticate(gatewayApiKey);
+    const task = taskContext(request);
     const { provider, upstreamModel } = await providers.resolve(body.model);
     const suppliedIdempotencyKey = request.headers["idempotency-key"];
     const gatewayRequestId = typeof suppliedIdempotencyKey === "string" && suppliedIdempotencyKey.length >= 8
@@ -289,7 +326,7 @@ export async function buildApp(options: { config?: GatewayConfig; fetchImpl?: ty
         await safelyRelease(creditClient, reservation.reservationId, "provider_response_invalid");
         throw new GatewayError(502, "provider_response_invalid", "AI provider did not return an event stream");
       }
-      void streamCompletion({ reply, upstream, controller, creditClient, config, reservation, providerId: provider.id, upstreamModel, body, promptTokens }).finally(() => clearTimeout(timeout));
+      void streamCompletion({ reply, upstream, controller, creditClient, config, reservation, providerId: provider.id, upstreamModel, body, promptTokens, task }).finally(() => clearTimeout(timeout));
       return reply;
     }
 
@@ -309,7 +346,7 @@ export async function buildApp(options: { config?: GatewayConfig; fetchImpl?: ty
     const usage = usageFrom(payload);
     const content = ((payload.choices as Array<{ message?: { content?: unknown } }> | undefined)?.[0]?.message?.content);
     const fallback = estimateCredits(config, promptTokens, typeof content === "string" ? content.length : 0);
-    await settle(creditClient, config, reservation, provider.id, upstreamModel, body.model, usage, fallback, typeof payload.id === "string" ? payload.id : undefined);
+    await settle(creditClient, config, reservation, provider.id, upstreamModel, body.model, usage, fallback, typeof payload.id === "string" ? payload.id : undefined, task);
     payload.model = body.model;
     reply.header("x-toking-reservation-id", reservation.reservationId);
     return payload;

@@ -38,6 +38,37 @@ describe("Toking AI Gateway", () => {
   const apps: Array<Awaited<ReturnType<typeof buildApp>>> = [];
   afterEach(async () => { await Promise.all(apps.splice(0).map((app) => app.close())); });
 
+  it("returns wallet balance and paginated transactions for a customer API key", async () => {
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      calls.push({ url, body });
+      if (url.endsWith("/internal/v1/wallet")) {
+        return json({ postedBalance: "2000", reservedBalance: "100", availableBalance: "1900", canReserve: true, status: "active" });
+      }
+      if (url.endsWith("/internal/v1/wallet/transactions")) {
+        return json({ data: [{ transactionId: "019c1234-1234-7000-8000-000000000001", type: "gift_card_redemption", amount: "2000", metadata: {}, postedAt: "2026-08-28T09:30:00.000Z" }], nextCursor: "next-page" });
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    };
+    const app = await buildApp({ config: testConfig(), fetchImpl, providers }); apps.push(app);
+
+    const wallet = await app.inject({ method: "GET", url: "/v1/wallet", headers: { authorization: `Bearer ${gatewayKey}` } });
+    const history = await app.inject({ method: "GET", url: "/v1/wallet/transactions?limit=10&cursor=current-page", headers: { authorization: `Bearer ${gatewayKey}` } });
+
+    expect(wallet.statusCode).toBe(200);
+    expect(wallet.json()).toMatchObject({ availableBalance: "1900", canReserve: true });
+    expect(wallet.headers["cache-control"]).toBe("no-store");
+    expect(history.statusCode).toBe(200);
+    expect(history.json()).toMatchObject({ data: [{ amount: "2000" }], nextCursor: "next-page" });
+    expect(history.headers["cache-control"]).toBe("no-store");
+    expect(calls).toEqual(expect.arrayContaining([
+      expect.objectContaining({ url: "http://credit.test/internal/v1/wallet", body: { gatewayApiKey: gatewayKey } }),
+      expect.objectContaining({ url: "http://credit.test/internal/v1/wallet/transactions", body: { gatewayApiKey: gatewayKey, limit: 10, cursor: "current-page" } }),
+    ]));
+  });
+
   it("reserves, proxies, and captures an Gangram chat completion", async () => {
     const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
     const fetchImpl: typeof fetch = async (input, init) => {
@@ -62,14 +93,19 @@ describe("Toking AI Gateway", () => {
     const app = await buildApp({ config: testConfig(), fetchImpl, providers }); apps.push(app);
     const response = await app.inject({
       method: "POST", url: "/v1/chat/completions",
-      headers: { authorization: `Bearer ${gatewayKey}`, "x-request-id": "gateway-request-123" },
+      headers: {
+        authorization: `Bearer ${gatewayKey}`,
+        "x-request-id": "gateway-request-123",
+        "x-toking-task-id": "task-42",
+        "x-toking-task-name": "Southeast Asia launch plan",
+      },
       payload: { model: "gangram/openai/gpt-4o-mini", messages: [{ role: "user", content: "Hello" }] },
     });
 
     expect(response.statusCode).toBe(200);
     expect(response.json().choices[0].message.content).toBe("Hello");
     expect(calls.find((call) => call.url.endsWith("/internal/v1/reservations"))?.body).toMatchObject({ gatewayApiKey: gatewayKey, gatewayRequestId: "gateway-request-123", estimatedCredits: "1000" });
-    expect(calls.find((call) => call.url.includes("/capture"))?.body).toMatchObject({ capturedCredits: "1500", metadata: { provider: "gangram", upstreamModel: "openai/gpt-4o-mini", model: "gangram/openai/gpt-4o-mini" } });
+    expect(calls.find((call) => call.url.includes("/capture"))?.body).toMatchObject({ capturedCredits: "1500", metadata: { provider: "gangram", upstreamModel: "openai/gpt-4o-mini", model: "gangram/openai/gpt-4o-mini", task: { id: "task-42", name: "Southeast Asia launch plan" } } });
     expect(response.json().model).toBe("gangram/openai/gpt-4o-mini");
     expect(calls.find((call) => call.url.endsWith("/chat/completions"))).toMatchObject({ url: "http://gangram.test/v1/chat/completions", body: { model: "openai/gpt-4o-mini" } });
   });

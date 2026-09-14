@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { and, desc, eq, sql as drizzleSql } from "drizzle-orm";
+import { and, desc, eq, lt, or, sql as drizzleSql } from "drizzle-orm";
 import { z } from "zod";
 
 import { config } from "../config.js";
@@ -49,6 +49,34 @@ import {
 
 const idempotencyHeader = z.string().min(8).max(200);
 const positiveCredits = z.coerce.bigint().positive();
+const transactionCursorSchema = z.object({
+  postedAt: z.string().datetime(),
+  transactionId: z.string().uuid(),
+});
+
+function encodeTransactionCursor(cursor: z.infer<typeof transactionCursorSchema>): string {
+  return Buffer.from(JSON.stringify(cursor)).toString("base64url");
+}
+
+function decodeTransactionCursor(cursor: string): z.infer<typeof transactionCursorSchema> {
+  try {
+    return transactionCursorSchema.parse(JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")));
+  } catch {
+    throw new AppError(400, "invalid_cursor", "Transaction cursor is invalid");
+  }
+}
+
+function transactionTask(metadata: Record<string, unknown>): { id?: string; name?: string } | null {
+  const task = metadata.task;
+  if (!task || typeof task !== "object" || Array.isArray(task)) return null;
+  const id = typeof (task as Record<string, unknown>).id === "string"
+    ? (task as Record<string, unknown>).id as string
+    : undefined;
+  const name = typeof (task as Record<string, unknown>).name === "string"
+    ? (task as Record<string, unknown>).name as string
+    : undefined;
+  return id || name ? { ...(id ? { id } : {}), ...(name ? { name } : {}) } : null;
+}
 
 function idempotencyKey(headers: Record<string, unknown>): string {
   return idempotencyHeader.parse(headers["idempotency-key"]);
@@ -463,6 +491,73 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     const body = z.object({ gatewayApiKey: z.string().min(20) }).parse(request.body);
     const resolved = await resolveGatewayApiKey(db, body.gatewayApiKey);
     return { creditAccountId: resolved.creditAccountId, defaultProviderId: resolved.defaultProviderId };
+  });
+
+  app.post("/internal/v1/wallet", async (request) => {
+    requireInternalService(request);
+    const body = z.object({ gatewayApiKey: z.string().min(20) }).parse(request.body);
+    const resolved = await resolveGatewayApiKey(db, body.gatewayApiKey);
+    return {
+      postedBalance: resolved.postedBalance,
+      reservedBalance: resolved.reservedBalance,
+      availableBalance: resolved.postedBalance - resolved.reservedBalance,
+      canReserve: resolved.postedBalance - resolved.reservedBalance > 0n,
+      status: resolved.accountStatus,
+    };
+  });
+
+  app.post("/internal/v1/wallet/transactions", async (request) => {
+    requireInternalService(request);
+    const body = z.object({
+      gatewayApiKey: z.string().min(20),
+      limit: z.number().int().min(1).max(100).default(20),
+      cursor: z.string().min(1).max(1000).optional(),
+    }).parse(request.body);
+    const resolved = await resolveGatewayApiKey(db, body.gatewayApiKey);
+    const cursor = body.cursor ? decodeTransactionCursor(body.cursor) : undefined;
+    const cursorCondition = cursor
+      ? or(
+          lt(ledgerJournals.postedAt, new Date(cursor.postedAt)),
+          and(
+            eq(ledgerJournals.postedAt, new Date(cursor.postedAt)),
+            lt(ledgerJournals.id, cursor.transactionId),
+          ),
+        )
+      : undefined;
+    const rows = await db
+      .select({
+        transactionId: ledgerJournals.id,
+        type: ledgerJournals.type,
+        sourceReference: ledgerJournals.sourceReference,
+        amount: ledgerEntries.amount,
+        metadata: ledgerJournals.metadata,
+        postedAt: ledgerJournals.postedAt,
+      })
+      .from(ledgerEntries)
+      .innerJoin(ledgerAccounts, eq(ledgerEntries.ledgerAccountId, ledgerAccounts.id))
+      .innerJoin(ledgerJournals, eq(ledgerEntries.journalId, ledgerJournals.id))
+      .where(and(
+        eq(ledgerAccounts.creditAccountId, resolved.creditAccountId),
+        cursorCondition,
+      ))
+      .orderBy(desc(ledgerJournals.postedAt), desc(ledgerJournals.id))
+      .limit(body.limit + 1);
+    const hasMore = rows.length > body.limit;
+    const page = hasMore ? rows.slice(0, body.limit) : rows;
+    const data = page.map((row) => ({
+      ...row,
+      task: transactionTask(row.metadata),
+    }));
+    const last = data.at(-1);
+    return {
+      data,
+      nextCursor: hasMore && last
+        ? encodeTransactionCursor({
+            postedAt: last.postedAt.toISOString(),
+            transactionId: last.transactionId,
+          })
+        : null,
+    };
   });
 
   app.post("/internal/v1/reservations", async (request, reply) => {

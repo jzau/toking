@@ -227,6 +227,60 @@ does not undo the successful redemption; retry this safe read separately.
 The seller's `tci_live_...` key cannot list models or call inference. Both actions
 require the redeemed customer's `tk_live_...` key.
 
+## Display the customer's wallet and usage history
+
+Use the redeemed customer's key with the AI Gateway base URL to read the current
+wallet balance:
+
+```http
+GET /v1/wallet HTTP/1.1
+Host: api.tokim.ai
+Authorization: Bearer tk_live_NEW_CUSTOMER_KEY
+```
+
+The response contains `postedBalance`, `reservedBalance`, `availableBalance`,
+`canReserve`, and `status`. Credit values are decimal strings.
+
+Fetch wallet credits and debits in reverse chronological order with:
+
+```http
+GET /v1/wallet/transactions?limit=20 HTTP/1.1
+Host: api.tokim.ai
+Authorization: Bearer tk_live_NEW_CUSTOMER_KEY
+```
+
+The response contains `data` and an opaque `nextCursor`. When `nextCursor` is not
+`null`, URL-encode it and pass it as the `cursor` query parameter to fetch the
+next page. `limit` defaults to 20 and may be between 1 and 100. Both wallet
+endpoints send `Cache-Control: no-store` and derive the wallet from the API key;
+they never accept a Credit Account ID from the caller.
+
+For AI usage to identify the originating task, add these optional headers to
+each chat-completion request:
+
+```http
+X-Toking-Task-Id: task-42
+X-Toking-Task-Name: Southeast Asia launch plan
+```
+
+Both values may be up to 200 characters. The ID should be a stable opaque ID
+from the third-party app, while the name is the user-facing text to display.
+These headers are consumed by the Toking Gateway and are not forwarded to the AI
+provider. When a request consumes credits, its transaction contains:
+
+```json
+{
+  "task": {
+    "id": "task-42",
+    "name": "Southeast Asia launch plan"
+  }
+}
+```
+
+Usage created without these headers, as well as gift-card credits, returns
+`"task": null`. Because task names become part of billing history, avoid placing
+secrets or sensitive message content in them.
+
 ## Step 3: use a selected model
 
 Use a returned model ID and the same customer key for inference:
@@ -236,6 +290,8 @@ POST /v1/chat/completions HTTP/1.1
 Host: api.tokim.ai
 Authorization: Bearer tk_live_NEW_CUSTOMER_KEY
 Content-Type: application/json
+X-Toking-Task-Id: task-42
+X-Toking-Task-Name: Southeast Asia launch plan
 
 {
   "model": "gangram/vendor/model-name",

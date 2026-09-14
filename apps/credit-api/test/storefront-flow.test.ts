@@ -52,6 +52,8 @@ afterAll(async () => { await gateway?.close(); await credit?.close(); await sql.
 const redeem = (code: string, key = attempt, token = client) => credit.inject({method: "POST", url: "/v1/client/gift-cards/redeem-anonymously", headers: {authorization: `Bearer ${token}`, "idempotency-key": key}, payload: {code}});
 const balance = async () => (await sql`select posted_balance::text as posted, reserved_balance::text as reserved from credit_accounts where id = ${accountId}`)[0];
 const models = (key = customerKey) => gateway.inject({method: "GET", url: "/v1/models", headers: {authorization: `Bearer ${key}`}});
+const wallet = (key = customerKey) => gateway.inject({method: "GET", url: "/v1/wallet", headers: {authorization: `Bearer ${key}`}});
+const transactions = (query = "", key = customerKey) => gateway.inject({method: "GET", url: `/v1/wallet/transactions${query}`, headers: {authorization: `Bearer ${key}`}});
 
 it("redeems then lists models, completes inference and checks the actual ledger", async () => {
   const result = await redeem(` ${codes[0]!.toLowerCase()} `);
@@ -69,10 +71,23 @@ it("redeems then lists models, completes inference and checks the actual ledger"
   const model = catalog.json().data[0].id;
   expect(model).toBe("test/test/model");
   expect(await balance()).toMatchObject({posted: "10000", reserved: "0"});
-  const completion = await gateway.inject({method: "POST", url: "/v1/chat/completions", headers: {authorization: `Bearer ${customerKey}`}, payload: {model, messages: [{role: "user", content: "Hello"}], max_tokens: 8}});
+  const completion = await gateway.inject({method: "POST", url: "/v1/chat/completions", headers: {authorization: `Bearer ${customerKey}`, "x-toking-task-id": "task-42", "x-toking-task-name": "Southeast Asia launch plan"}, payload: {model, messages: [{role: "user", content: "Hello"}], max_tokens: 8}});
   expect(completion.statusCode).toBe(200);
   expect(completion.json().choices[0].message.content).toBe("Hello");
   expect(await balance()).toMatchObject({posted: "9999", reserved: "0"});
+  const customerWallet = await wallet();
+  expect(customerWallet.statusCode).toBe(200);
+  expect(customerWallet.json()).toMatchObject({postedBalance: "9999", reservedBalance: "0", availableBalance: "9999", canReserve: true, status: "active"});
+  const firstHistoryPage = await transactions("?limit=1");
+  expect(firstHistoryPage.statusCode).toBe(200);
+  expect(firstHistoryPage.json().data).toHaveLength(1);
+  expect(firstHistoryPage.json().data[0]).toMatchObject({type: "ai_credit_capture", amount: "-1", task: {id: "task-42", name: "Southeast Asia launch plan"}});
+  expect(firstHistoryPage.json().nextCursor).toEqual(expect.any(String));
+  const secondHistoryPage = await transactions(`?limit=1&cursor=${encodeURIComponent(firstHistoryPage.json().nextCursor)}`);
+  expect(secondHistoryPage.statusCode).toBe(200);
+  expect(secondHistoryPage.json().data).toHaveLength(1);
+  expect(secondHistoryPage.json().data[0]).toMatchObject({type: "gift_card_redemption", amount: "10000", task: null});
+  expect(secondHistoryPage.json().nextCursor).toBeNull();
   const journals = await sql`select type, count(*)::int as count from ledger_journals where source_reference in (select id::text from reservations where credit_account_id = ${accountId}) group by type`;
   expect(journals.length).toBeGreaterThan(0);
 });
@@ -85,6 +100,9 @@ it("rejects invalid cards, reused cards, conflicting retries and wrong credentia
   expect((await redeem(codes[1]!, randomUUID(), customerKey)).statusCode).toBe(401);
   expect((await models(client)).statusCode).toBe(401);
   expect((await models("tk_live_" + "z".repeat(32))).statusCode).toBe(401);
+  expect((await wallet("tk_live_" + "z".repeat(32))).statusCode).toBe(401);
+  expect((await transactions("", "tk_live_" + "z".repeat(32))).statusCode).toBe(401);
+  expect((await transactions("?cursor=not-a-valid-cursor")).json().error.code).toBe("invalid_cursor");
   expect(await balance()).toMatchObject({posted: "9999", reserved: "0"});
 });
 

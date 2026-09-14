@@ -11,6 +11,27 @@ export type Reservation = {
   defaultProviderId: string | null;
 };
 
+export type Wallet = {
+  postedBalance: string;
+  reservedBalance: string;
+  availableBalance: string;
+  canReserve: boolean;
+  status: string;
+};
+
+export type WalletTransactions = {
+  data: Array<{
+    transactionId: string;
+    type: string;
+    sourceReference: string;
+    amount: string;
+    metadata: Record<string, unknown>;
+    task: { id?: string; name?: string } | null;
+    postedAt: string;
+  }>;
+  nextCursor: string | null;
+};
+
 export class CreditClient {
   constructor(
     private readonly config: GatewayConfig,
@@ -44,6 +65,20 @@ export class CreditClient {
     return this.request<{ creditAccountId: string; defaultProviderId: string | null }>("/internal/v1/gateway-api-keys/resolve", {
       method: "POST",
       body: JSON.stringify({ gatewayApiKey }),
+    });
+  }
+
+  wallet(gatewayApiKey: string) {
+    return this.request<Wallet>("/internal/v1/wallet", {
+      method: "POST",
+      body: JSON.stringify({ gatewayApiKey }),
+    });
+  }
+
+  walletTransactions(gatewayApiKey: string, limit: number, cursor?: string) {
+    return this.request<WalletTransactions>("/internal/v1/wallet/transactions", {
+      method: "POST",
+      body: JSON.stringify({ gatewayApiKey, limit, ...(cursor ? { cursor } : {}) }),
     });
   }
 
